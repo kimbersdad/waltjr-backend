@@ -1,7 +1,6 @@
 import express from "express";
 import multer from "multer";
 import cors from "cors";
-import pdfParse from "pdf-parse";
 import OpenAI from "openai";
 
 const app = express();
@@ -19,12 +18,12 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Basic health check
+// Health check route
 app.get("/", (req, res) => {
   res.send("✅ Walt Jr. backend with PDF reading is running!");
 });
 
-// Chat route (no PDF)
+// Basic chat route (no PDF)
 app.post("/chat", async (req, res) => {
   const userMessage = req.body.message || "Hello";
   try {
@@ -42,12 +41,13 @@ app.post("/chat", async (req, res) => {
   }
 });
 
-// PDF upload route
+// PDF upload route (lazy-load pdf-parse)
 app.post("/upload-pdf", upload.single("file"), async (req, res) => {
   try {
+    const pdfParse = (await import("pdf-parse")).default; // <— Lazy import fixes Render error
     const dataBuffer = req.file.buffer;
     const pdfData = await pdfParse(dataBuffer);
-    const extractedText = pdfData.text.slice(0, 10000); // limit to avoid huge tokens
+    const extractedText = pdfData.text.slice(0, 10000); // limit large PDFs
 
     const question = req.body.question || "Summarize this document";
 
