@@ -1,34 +1,37 @@
-import express from "express";
-import cors from "cors";
-import OpenAI from "openai";
-import multer from "multer";
-import fs from "fs";
-import pdfParse from "pdf-parse/lib/pdf-parse.js";
-import Tesseract from "tesseract.js";
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const fs = require('fs');
+const pdfParse = require('pdf-parse');
+const { OpenAI } = require('openai');
+require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
+// MIDDLEWARE
+app.use(cors());
+app.use(express.json());
+const upload = multer({ dest: 'uploads/' });
+
+// OPENAI INIT
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-app.use(cors());
-app.use(express.json());
-
-// Health check route
-app.get("/", (req, res) => {
-  res.send("✅ Walt Jr. backend is live and healthy.");
+// ROUTES
+app.get('/', (req, res) => {
+  res.send('Walt Jr. backend is live');
 });
 
-// /chat endpoint
-app.post("/chat", async (req, res) => {
-  const userMessage = req.body.message || "Hello";
-
+// 🧠 CHAT WITH ASSISTANT
+app.post('/chat', async (req, res) => {
   try {
+    const userMessage = req.body.message;
     const thread = await openai.beta.threads.create();
-    await openai.beta.threads.messages.create(thread.id, {
-      role: "user",
+
+    const message = await openai.beta.threads.messages.create(thread.id, {
+      role: 'user',
       content: userMessage,
     });
 
@@ -36,73 +39,60 @@ app.post("/chat", async (req, res) => {
       assistant_id: process.env.ASSISTANT_ID,
     });
 
-    let runStatus;
-    while (true) {
+    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    while (runStatus.status !== 'completed') {
+      await new Promise(resolve => setTimeout(resolve, 1000));
       runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-      if (runStatus.status === "completed") break;
-      await new Promise((r) => setTimeout(r, 1000));
     }
 
     const messages = await openai.beta.threads.messages.list(thread.id);
     const reply = messages.data[0].content[0].text.value;
 
     res.json({ reply });
-  } catch (error) {
-    console.error("❌ Error in /chat:", error);
-    res.status(500).json({ error: "Something went wrong." });
+  } catch (err) {
+    console.error('❌ /chat error:', err);
+    res.status(500).json({ error: 'Chat failed', details: err.message });
   }
 });
 
-// /upload endpoint (PDF or image file)
-const upload = multer({ dest: "uploads/" });
-
-app.post("/upload", upload.single("file"), async (req, res) => {
-  const filePath = req.file.path;
-  let extractedText = "";
-
+// 📎 PDF UPLOAD + QUESTION
+app.post('/upload-pdf', upload.single('file'), async (req, res) => {
   try {
-    if (req.file.mimetype === "application/pdf") {
-      const dataBuffer = fs.readFileSync(filePath);
-      const parsed = await pdfParse(dataBuffer);
-      extractedText = parsed.text.trim();
+    const filePath = req.file.path;
+    const pdfBuffer = fs.readFileSync(filePath);
+    const data = await pdfParse(pdfBuffer);
+    const textContent = data.text;
 
-      if (!extractedText) {
-        extractedText = await Tesseract.recognize(filePath, "eng").then((res) => res.data.text);
-      }
-    } else {
-      extractedText = await Tesseract.recognize(filePath, "eng").then((res) => res.data.text);
-    }
-
-    if (!extractedText) throw new Error("No text could be extracted.");
+    const question = req.body.question || 'Summarize this file';
 
     const thread = await openai.beta.threads.create();
     await openai.beta.threads.messages.create(thread.id, {
-      role: "user",
-      content: `Here's the content of the uploaded file:\n\n${extractedText}`,
+      role: 'user',
+      content: `${question}\n\n${textContent}`,
     });
 
     const run = await openai.beta.threads.runs.create(thread.id, {
       assistant_id: process.env.ASSISTANT_ID,
     });
 
-    let status;
-    while (true) {
-      status = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-      if (status.status === "completed") break;
-      await new Promise((r) => setTimeout(r, 1000));
+    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    while (runStatus.status !== 'completed') {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
     }
 
     const messages = await openai.beta.threads.messages.list(thread.id);
     const reply = messages.data[0].content[0].text.value;
 
+    fs.unlinkSync(filePath); // Clean up temp file
     res.json({ reply });
-    fs.unlinkSync(filePath);
-  } catch (error) {
-    console.error("❌ Error in /upload:", error);
-    res.status(500).json({ error: "Failed to process the uploaded file." });
+  } catch (err) {
+    console.error('❌ /upload-pdf error:', err);
+    res.status(500).json({ error: 'PDF upload failed', details: err.message });
   }
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Walt Jr. backend running on port ${port}`);
+// START SERVER
+app.listen(PORT, () => {
+  console.log(`✅ Walt Jr. backend running on port ${PORT}`);
 });
