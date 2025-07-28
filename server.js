@@ -59,7 +59,6 @@ app.post("/chat", async (req, res) => {
 app.listen(port, () => {
   console.log(`🚀 Walt Jr. is running on port ${port}`);
 });
-import multer from "multer";
 import fs from "fs";
 import pdfParse from "pdf-parse";
 import Tesseract from "tesseract.js";
