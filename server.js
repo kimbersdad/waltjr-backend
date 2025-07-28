@@ -13,7 +13,7 @@ app.use(express.json());
 const port = process.env.PORT || 3000;
 
 // ✅ Your Walt Jr. Assistant ID
-const ASSISTANT_ID = "asst_k7kxM8JbQtxoiBCcrpTrkgoh";
+const ASSISTANT_ID = "asst_EJTN6YRMFIVVYoxKzOltCHRS";
 
 // ✅ OpenAI client
 const openai = new OpenAI({
