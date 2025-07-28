@@ -1,98 +1,89 @@
-const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const fs = require('fs');
-const pdfParse = require('pdf-parse');
-const { OpenAI } = require('openai');
-require('dotenv').config();
+import express from 'express';
+import cors from 'cors';
+import bodyParser from 'body-parser';
+import multer from 'multer';
+import pdfParse from 'pdf-parse';
+import dotenv from 'dotenv';
+import fetch from 'node-fetch';
+
+dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const upload = multer();
 
-// MIDDLEWARE
 app.use(cors());
-app.use(express.json());
-const upload = multer({ dest: 'uploads/' });
+app.use(bodyParser.json());
 
-// OPENAI INIT
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const PORT = process.env.PORT || 3000;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ASSISTANT_ID = process.env.ASSISTANT_ID;
 
-// ROUTES
-app.get('/', (req, res) => {
-  res.send('Walt Jr. backend is live');
-});
-
-// 🧠 CHAT WITH ASSISTANT
+// 🧠 Basic chat route
 app.post('/chat', async (req, res) => {
+  const { message } = req.body;
+
   try {
-    const userMessage = req.body.message;
-    const thread = await openai.beta.threads.create();
-
-    const message = await openai.beta.threads.messages.create(thread.id, {
-      role: 'user',
-      content: userMessage,
+    const replyRes = await fetch('https://api.openai.com/v1/assistants/' + ASSISTANT_ID + '/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: message }],
+      })
     });
 
-    const run = await openai.beta.threads.runs.create(thread.id, {
-      assistant_id: process.env.ASSISTANT_ID,
-    });
+    const replyData = await replyRes.json();
 
-    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-    while (runStatus.status !== 'completed') {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    if (replyData?.error) {
+      console.error(replyData.error);
+      return res.status(500).json({ reply: `⚠️ ${replyData.error.message}` });
     }
 
-    const messages = await openai.beta.threads.messages.list(thread.id);
-    const reply = messages.data[0].content[0].text.value;
+    const content = replyData?.choices?.[0]?.message?.content || '⚠️ No reply.';
+    res.json({ reply: content });
 
-    res.json({ reply });
   } catch (err) {
-    console.error('❌ /chat error:', err);
-    res.status(500).json({ error: 'Chat failed', details: err.message });
+    console.error(err);
+    res.status(500).json({ reply: '⚠️ Server error.' });
   }
 });
 
-// 📎 PDF UPLOAD + QUESTION
+// 📎 PDF Upload route
 app.post('/upload-pdf', upload.single('file'), async (req, res) => {
+  const pdfBuffer = req.file.buffer;
+  const question = req.body.question || 'Summarize this file.';
+
   try {
-    const filePath = req.file.path;
-    const pdfBuffer = fs.readFileSync(filePath);
-    const data = await pdfParse(pdfBuffer);
-    const textContent = data.text;
+    const parsed = await pdfParse(pdfBuffer);
+    const prompt = `${question}\n\nFile content:\n${parsed.text}`;
 
-    const question = req.body.question || 'Summarize this file';
-
-    const thread = await openai.beta.threads.create();
-    await openai.beta.threads.messages.create(thread.id, {
-      role: 'user',
-      content: `${question}\n\n${textContent}`,
+    const replyRes = await fetch('https://api.openai.com/v1/assistants/' + ASSISTANT_ID + '/messages', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: prompt }],
+      })
     });
 
-    const run = await openai.beta.threads.runs.create(thread.id, {
-      assistant_id: process.env.ASSISTANT_ID,
-    });
+    const replyData = await replyRes.json();
 
-    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
-    while (runStatus.status !== 'completed') {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    if (replyData?.error) {
+      console.error(replyData.error);
+      return res.status(500).json({ reply: `⚠️ ${replyData.error.message}` });
     }
 
-    const messages = await openai.beta.threads.messages.list(thread.id);
-    const reply = messages.data[0].content[0].text.value;
+    const content = replyData?.choices?.[0]?.message?.content || '⚠️ No reply.';
+    res.json({ reply: content });
 
-    fs.unlinkSync(filePath); // Clean up temp file
-    res.json({ reply });
   } catch (err) {
-    console.error('❌ /upload-pdf error:', err);
-    res.status(500).json({ error: 'PDF upload failed', details: err.message });
+    console.error(err);
+    res.status(500).json({ reply: '⚠️ Server error during PDF handling.' });
   }
 });
 
-// START SERVER
-app.listen(PORT, () => {
-  console.log(`✅ Walt Jr. backend running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
