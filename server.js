@@ -3,7 +3,7 @@ import cors from "cors";
 import OpenAI from "openai";
 import multer from "multer";
 import fs from "fs";
-import pdfParse from "pdf-parse";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import Tesseract from "tesseract.js";
 
 const app = express();
